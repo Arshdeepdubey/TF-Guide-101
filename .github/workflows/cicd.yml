@@ -7,10 +7,9 @@ on:
     branches:
       - main
 
-# Required for OIDC authentication to AWS
 permissions:
   id-token: write
-  contents: read
+  contents: write # Crucial for pushing the calculated semantic tag
 
 jobs:
   build:
@@ -18,13 +17,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: '0' # REQUIRED: Fetches all history and tags for SemVer calculations
 
       # Log into AWS using the global OIDC role
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           audience: sts.amazonaws.com
-          aws-region: us-east-1 # Switch to your target region if different
+          aws-region: us-east-1
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
 
       - name: Set up Terraform
@@ -37,19 +38,26 @@ jobs:
         run: terraform plan
 
       - name: Terraform Apply
-        # Only runs on a successful push/merge to the main branch
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve
 
+      - name: Bump Version and Push SemVer Tag
+        # Only bumps and tags if the Terraform Apply succeeds on main branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: tag_version
+        uses: anothrNick/github-tag-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch # Bumps the patch number (x.x.+1) if no keywords are used
+          TAG_PREFIX: v       # Tags will look like v1.0.0
+
       - name: Manual/Conditional Destroy
-        # Runs only on push to main if you explicitly want an automated teardown pattern
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-            echo "Running terraform destroy..."
-            terraform destroy -auto-approve
+          echo "Running terraform destroy..."
+          terraform destroy -auto-approve
 
       - name: Notify on PR Failure
-        # This will ONLY run if a prior step (like terraform plan) fails during a PR review
         if: failure() && github.event_name == 'pull_request'
         run: |
           echo "Run failed. Please fix it or delete resources manually to avoid audit issues."
