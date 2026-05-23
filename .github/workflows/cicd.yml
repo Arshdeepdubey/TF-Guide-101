@@ -1,0 +1,56 @@
+name: Terraform CI/CD
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Log into AWS using the global OIDC role
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-east-1 # Switch to your target region if different
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        # Only runs on a successful push/merge to the main branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
+
+      - name: Manual/Conditional Destroy
+        # Runs only on push to main if you explicitly want an automated teardown pattern
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+            echo "Running terraform destroy..."
+            terraform destroy -auto-approve
+
+      - name: Notify on PR Failure
+        # This will ONLY run if a prior step (like terraform plan) fails during a PR review
+        if: failure() && github.event_name == 'pull_request'
+        run: |
+          echo "Run failed. Please fix it or delete resources manually to avoid audit issues."
+          exit 1
