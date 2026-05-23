@@ -1,6 +1,9 @@
 # Local .terraform directories
 **/.terraform/*
 
+# Local json files that may contain sensitive data
+*.json
+
 # .tfstate files (contain sensitive data)
 *.tfstate
 *.tfstate.*
